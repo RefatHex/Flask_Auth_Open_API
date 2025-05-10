@@ -1,565 +1,187 @@
-# API Manual Testing Guide
+# AI Memory Management System
 
-This document provides step-by-step instructions to manually test the API, starting from creating an account to performing chat-related requests. Each API is described with its purpose, workflow, and implementation details.
+A sophisticated system for managing multiple AI instances, each with their own unique identity and persistent memory, built entirely on Firestore.
 
----
+## System Architecture
 
-## Prerequisites
+This system is designed to support a single user (administrator) who can manage multiple AI instances. Each AI has:
 
-1. Install a tool like [Postman](https://www.postman.com/) or [cURL](https://curl.se/).
-2. Obtain the base URL for the API (e.g., `http://localhost:5000`).
+- Unique UUID for persistent identity
+- Dedicated Firestore collections for memory storage
+- Personalized long-term context retention
 
----
+### Core Components
+
+#### 1. Memory Management (Memory_Weaver.py)
+
+The `MemoryWeaver` class provides a comprehensive memory management system for AI instances:
+
+- **Memory Types:**
+
+  - `working_memory`: Recent context and conversations (short-term)
+  - `long_term_memory`: Important information to be retained indefinitely
+  - `personal_logs`: AI's internal thoughts and reflections
+  - `archive`: Historical records that may be occasionally accessed
+
+- **Key Functions:**
+  - `create_ai_memory_space(ai_uuid, ai_name)`: Initializes all memory collections for a new AI
+  - `store_memory(ai_uuid, ai_name, memory_type, content, metadata)`: Adds new memories to specified collection
+  - `retrieve_memories(ai_uuid, ai_name, memory_type, limit, filter_query)`: Gets memories with optional filtering
+  - `move_memory(ai_uuid, ai_name, memory_id, from_type, to_type)`: Relocates memories between collections
+
+#### 2. Data Storage (Firestore)
+
+All data is stored in Firestore with the following collections:
+
+- **ai_registry**: Stores metadata about each AI instance
+
+  - ai_uuid, name, creation date, access permissions
+
+- **chat_sessions**: Individual conversation sessions
+
+  - id, name, user_id, ai_uuid, created_at
+
+- **chats**: All chat messages
+
+  - message, response, user_id, session_id, timestamp
+
+- **memory collections**: Specialized collections for each AI and memory type
+  - Format: `{memory_type}_{ai_uuid}_{ai_name}`
+  - Example: `working_memory_1234_assistant`
+
+#### 3. Socket Communication (sockets.py)
+
+Real-time communication framework to provide immediate updates and interactions:
+
+- Event handlers for various socket events
+- Authentication system to verify connections
+- Room-based messaging for targeted AI communications
+- Memory update notifications
+
+#### 4. Socket Clients (ai_socket_client.py)
+
+Client-side socket connection utilities for AI instances:
+
+- Authentication with server
+- Room joining based on AI UUID
+- Memory update notifications
+- Heartbeat/keep-alive functionality
 
 ## API Endpoints
 
-### 1. **Create an Account**
+### AI Management
 
-**Endpoint:** `POST /signup`
+- **POST /v1/handshake**
 
-**Description:**  
-Registers a new user account. Only the admin email (defined in `.env` as `ADMIN_EMAIL`) is allowed to register.
+  - Creates a new AI instance with unique UUID
+  - Initializes memory collections
+  - Returns session data and database paths
+  - Example payload: `{"ai_name": "Assistant Name"}`
 
-**Request JSON:**
+- **POST /v1/chat/completions**
+  - Processes new messages for an AI
+  - Retrieves relevant memory context
+  - Gets completion from language model
+  - Stores response in memory
 
-```json
-{
-  "name": "Test User",
-  "email": "admin@example.com",
-  "password": "Test@1234",
-  "confirm": "Test@1234"
-}
-```
-
-**Example cURL Command:**
-
-```bash
-curl -X POST http://localhost:5000/signup \
--H "Content-Type: application/json" \
--d '{
-  "name": "Test User",
-  "email": "admin@example.com",
-  "password": "Test@1234",
-  "confirm": "Test@1234"
-}'
-```
+### Memory Management
 
-**Response:**
+- **POST /create_memory**
 
-```json
-{
-  "msg": "User created successfully"
-}
-```
+  - Creates a new memory entry in specified collection
+  - Required fields: `ai_name`, `ai_uuid`, `memory_type`, `memory_data`
 
----
+- **POST /edit_memory**
 
-### 2. **Login**
+  - Updates an existing memory entry
+  - Required fields: `ai_name`, `ai_uuid`, `memory_type`, `memory_id`, `memory_data`
 
-**Endpoint:** `POST /login`
+- **POST /delete_memory**
 
-**Description:**  
-Authenticates the user and returns a JWT token for accessing protected resources.
+  - Removes a memory entry
+  - Required fields: `ai_name`, `ai_uuid`, `memory_type`, `memory_id`
 
-**Request JSON:**
+- **POST /move_memory**
+  - Relocates memory between collections
+  - Required fields: `ai_name`, `ai_uuid`, `from_memory_type`, `to_memory_type`, `document_id`
 
-```json
-{
-  "email": "admin@example.com",
-  "password": "Test@1234"
-}
-```
+## Data Flow
 
-**Example cURL Command:**
+1. **AI Creation:**
 
-```bash
-curl -X POST http://localhost:5000/login \
--H "Content-Type: application/json" \
--d '{
-  "email": "admin@example.com",
-  "password": "Test@1234"
-}'
-```
+   - Client calls `/v1/handshake` with AI name
+   - System creates UUID, initializes memory collections
+   - Returns session data with UUID
 
-**Response:**
+2. **Memory Storage:**
 
-```json
-{
-  "token": "your-access-token",
-  "name": "Test User"
-}
-```
+   - AI interactions stored in Firestore collections
+   - Organized by memory type (working, long-term, etc.)
+   - UUID-based collection names ensure isolation
 
----
+3. **Conversation Context:**
 
-### 3. **Get All Sessions**
+   - System retrieves recent memories for context
+   - Combines with current messages
+   - Sends to language model for processing
+   - Stores response in working memory
 
-**Endpoint:** `GET /sessions`
+4. **Memory Management:**
+   - Important information can be moved between collections
+   - Long-term memory persists across conversations
+   - Archives can store historical context
 
-**Description:**  
-Retrieves all chat sessions for the authenticated user.
+## Socket Events
 
-**Headers:**
+- **connect**: Initial connection to server
+- **authenticate**: Verify connection with API key
+- **join**: Join an AI-specific room by UUID
+- **memory_update**: Notify about memory changes
+- **message**: General communication channel
 
-```json
-{
-  "Authorization": "Bearer your-access-token"
-}
-```
+## Deployment Guide
 
-**Example cURL Command:**
+### Prerequisites
 
-```bash
-curl -X GET http://localhost:5000/sessions \
--H "Authorization: Bearer your-access-token"
-```
+- Python 3.9+
+- Firebase account with Firestore database
+- OpenAI API key
 
-**Response:**
+### Setup
 
-```json
-[
-  {
-    "id": 1,
-    "name": "Chat Session 1",
-    "created_at": "2023-10-05T12:00:00Z"
-  },
-  {
-    "id": 2,
-    "name": "Chat Session 2",
-    "created_at": "2023-10-06T15:30:00Z"
-  }
-]
-```
+1. Install dependencies:
 
----
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-### 4. **Create a New Session**
+2. Configure environment variables in `.env` file:
 
-**Endpoint:** `POST /session`
+   - `FLASK_APP_SECRET_KEY`: Application security key
+   - `JWT_SECRET_KEY`: JWT token key
+   - `OPENAI_API_KEY_FLASK_APP`: OpenAI API key
+   - `ADMIN_EMAIL`: Administrator email
 
-**Description:**  
-Creates a new chat session for the user.
+3. Place Firebase service account key in `firebase_sa.json`
 
-**Request JSON:**
+4. Start the server:
+   ```bash
+   python App.py
+   ```
 
-```json
-{
-  "name": "New Chat Session"
-}
-```
+## Security Considerations
 
-**Headers:**
+- All API calls require authentication
+- Socket connections must be authenticated
+- AI UUIDs are used for permission scoping
+- Access controls defined in AI registry
 
-```json
-{
-  "Authorization": "Bearer your-access-token"
-}
-```
+## Extension Points
 
-**Example cURL Command:**
+The system is designed to be extended with:
 
-```bash
-curl -X POST http://localhost:5000/session \
--H "Content-Type: application/json" \
--H "Authorization: Bearer your-access-token" \
--d '{
-  "name": "New Chat Session"
-}'
-```
-
-**Response:**
-
-```json
-{
-  "msg": "Session created",
-  "session_id": 3
-}
-```
-
----
-
-### 5. **Delete a Session**
-
-**Endpoint:** `DELETE /session/<session_id>`
-
-**Description:**  
-Deletes a specific chat session and all associated chats.
-
-**Headers:**
-
-```json
-{
-  "Authorization": "Bearer your-access-token"
-}
-```
-
-**Example cURL Command:**
-
-```bash
-curl -X DELETE http://localhost:5000/session/1 \
--H "Authorization: Bearer your-access-token"
-```
-
-**Response:**
-
-```json
-{
-  "msg": "Session deleted successfully"
-}
-```
-
----
-
-### 6. **Rename a Session**
-
-**Endpoint:** `PUT /session/<session_id>/rename`
-
-**Description:**  
-Renames an existing chat session.
-
-**Request JSON:**
-
-```json
-{
-  "name": "Updated Session Name"
-}
-```
-
-**Headers:**
-
-```json
-{
-  "Authorization": "Bearer your-access-token"
-}
-```
-
-**Example cURL Command:**
-
-```bash
-curl -X PUT http://localhost:5000/session/1/rename \
--H "Content-Type: application/json" \
--H "Authorization: Bearer your-access-token" \
--d '{
-  "name": "Updated Session Name"
-}'
-```
-
-**Response:**
-
-```json
-{
-  "msg": "Session renamed successfully",
-  "new_name": "Updated Session Name"
-}
-```
-
----
-
-### 7. **Send a Chat Message**
-
-**Endpoint:** `POST /chat`
-
-**Description:**  
-Sends a message to the AI and retrieves a response. If no session ID is provided, a new session is created automatically. The system stores embeddings of the conversation using Pinecone for context retrieval in future interactions.
-
-**Request JSON:**
-
-```json
-{
-  "message": "Hello, AI!",
-  "session_id": 1
-}
-```
-
-**Headers:**
-
-```json
-{
-  "Authorization": "Bearer your-access-token"
-}
-```
-
-**Example cURL Command:**
-
-```bash
-curl -X POST http://localhost:5000/chat \
--H "Content-Type: application/json" \
--H "Authorization: Bearer your-access-token" \
--d '{
-  "message": "Hello, AI!",
-  "session_id": 1
-}'
-```
-
-**Response:**
-
-```json
-{
-  "response": "Hello! How can I assist you today?",
-  "session_id": 1
-}
-```
-
-**Implementation Details:**
-
-- The message is first sent to Pinecone to retrieve relevant context from previous conversations
-- The conversation context and user message are sent to OpenAI using the GPT-4o-mini model
-- The user message and AI response are stored in the database
-- For messages longer than 10 characters, the system creates an embedding and stores it in Pinecone for future context retrieval
-
----
-
-### 8. **Get Chat History**
-
-**Endpoint:** `GET /sessions/<session_id>/history`
-
-**Description:**  
-Retrieves the chat history for a specific session.
-
-**Headers:**
-
-```json
-{
-  "Authorization": "Bearer your-access-token"
-}
-```
-
-**Example cURL Command:**
-
-```bash
-curl -X GET http://localhost:5000/sessions/1/history \
--H "Authorization: Bearer your-access-token"
-```
-
-**Response:**
-
-```json
-[
-  {
-    "message": "Hello, AI!",
-    "response": "Hello! How can I assist you today?",
-    "timestamp": "2023-10-05T12:05:00Z"
-  },
-  {
-    "message": "Tell me about machine learning",
-    "response": "Machine learning is a subfield of artificial intelligence...",
-    "timestamp": "2023-10-05T12:07:30Z"
-  }
-]
-```
-
----
-
-### 9. **Get All Chats for a Session**
-
-**Endpoint:** `GET /chats/<session_id>`
-
-**Description:**  
-Retrieves all chats for a specific session, including chat IDs for individual management.
-
-**Headers:**
-
-```json
-{
-  "Authorization": "Bearer your-access-token"
-}
-```
-
-**Example cURL Command:**
-
-```bash
-curl -X GET http://localhost:5000/chats/1 \
--H "Authorization: Bearer your-access-token"
-```
-
-**Response:**
-
-```json
-[
-  {
-    "id": 1,
-    "message": "Hello, AI!",
-    "response": "Hello! How can I assist you today?",
-    "timestamp": "2023-10-05T12:05:00Z"
-  },
-  {
-    "id": 2,
-    "message": "Tell me about machine learning",
-    "response": "Machine learning is a subfield of artificial intelligence...",
-    "timestamp": "2023-10-05T12:07:30Z"
-  }
-]
-```
-
----
-
-### 10. **Delete a Specific Chat**
-
-**Endpoint:** `DELETE /chats/<chat_id>`
-
-**Description:**  
-Deletes a specific chat message and its response.
-
-**Headers:**
-
-```json
-{
-  "Authorization": "Bearer your-access-token"
-}
-```
-
-**Example cURL Command:**
-
-```bash
-curl -X DELETE http://localhost:5000/chats/1 \
--H "Authorization: Bearer your-access-token"
-```
-
-**Response:**
-
-```json
-{
-  "msg": "Chat deleted successfully"
-}
-```
-
----
-
-### 11. **AI Handshake (Socket Connection)**
-
-**Endpoint:** `POST /v1/handshake`
-
-**Description:**  
-Initializes an AI session, creates memory spaces in Firestore, and returns session metadata including a UUID. This is the starting point for establishing communication with an AI agent.
-
-**Request JSON:**
-
-```json
-{
-  "ai_name": "Assistant AI"
-}
-```
-
-**Example cURL Command:**
-
-```bash
-curl -X POST http://localhost:5000/v1/handshake \
--H "Content-Type: application/json" \
--d '{
-  "ai_name": "Assistant AI"
-}'
-```
-
-**Response:**
-
-```json
-{
-  "message": "Handshake successful",
-  "sessionData": {
-    "ai_name": "Assistant AI",
-    "ai_uuid": "123e4567-e89b-12d3-a456-426614174000",
-    "created_at": "2023-10-05T12:00:00Z",
-    "session_id": 1,
-    "internet_access": "safe_only",
-    "tools": [],
-    "notes": ""
-  },
-  "dbPaths": {
-    "working_memory": "working_memory_123e4567-e89b-12d3-a456-426614174000_Assistant_AI",
-    "personal_logs": "personal_logs_123e4567-e89b-12d3-a456-426614174000_Assistant_AI",
-    "long_term_memory": "long_term_memory_123e4567-e89b-12d3-a456-426614174000_Assistant_AI",
-    "archive": "archive_123e4567-e89b-12d3-a456-426614174000_Assistant_AI"
-  }
-}
-```
-
-**Socket Implementation Details:**
-
-- Upon handshake completion, the server generates a unique UUID for the AI
-- The system creates a corresponding socket room using this UUID via `join_room(ai_uuid)`
-- Clients connect to the socket server and join their specific room using the `join` event
-- The socket implementation uses Flask-SocketIO with threading mode for asynchronous communication
-- Each AI instance has its own isolated socket room identified by its UUID
-- This enables real-time communication between the client and AI without affecting other connections
-
----
-
-### 12. **Chat Completions (AI Conversation)**
-
-**Endpoint:** `POST /v1/chat/completions`
-
-**Description:**  
-Sends a series of messages to the AI and retrieves a response. The system retrieves context from the AI's working memory before generating a response.
-
-**Request JSON:**
-
-```json
-{
-  "ai_uuid": "123e4567-e89b-12d3-a456-426614174000",
-  "ai_name": "Assistant AI",
-  "messages": [{ "role": "user", "content": "What is the weather today?" }],
-  "temperature": 0.7,
-  "stream": false
-}
-```
-
-**Example cURL Command:**
-
-```bash
-curl -X POST http://localhost:5000/v1/chat/completions \
--H "Content-Type: application/json" \
--d '{
-  "ai_uuid": "123e4567-e89b-12d3-a456-426614174000",
-  "ai_name": "Assistant AI",
-  "messages": [
-    {"role": "user", "content": "What is the weather today?"}
-  ]
-}'
-```
-
-**Response (Non-streaming):**
-
-```json
-{
-  "id": "chatcmpl-abc123",
-  "object": "chat.completion",
-  "created": 1696507200,
-  "model": "gpt-4o-mini",
-  "choices": [
-    {
-      "index": 0,
-      "message": {
-        "role": "assistant",
-        "content": "I don't have the ability to check the current weather. To get the current weather, you could check a weather website or app, or ask a virtual assistant that has internet access."
-      },
-      "finish_reason": "stop"
-    }
-  ],
-  "usage": {
-    "prompt_tokens": 0,
-    "completion_tokens": 0,
-    "total_tokens": 0
-  }
-}
-```
-
-**Streaming Response:**
-
-When `stream` is set to `true`, the API returns chunks of the response as they become available.
-
-**Memory Implementation:**
-
-- The system maintains separate memory collections in Firestore for each AI instance
-- When a message is received, recent messages from the AI's working memory are fetched
-- These messages provide context for the current conversation
-- After generating a response, the new message and response are stored in the working memory
-- This creates a persistent memory that allows the AI to reference previous interactions
-
----
-
-## Notes
-
-- Replace `http://localhost:5000` with the actual base URL of the API.
-- Replace `your-access-token` with the token obtained from the login step.
-- Ensure all required fields are provided in the request JSON for each endpoint.
-- The chat functionality integrates with OpenAI's GPT model and uses Pinecone for vector embeddings storage and retrieval.
+1. **AI Capability System**: Add new tools and functions to specific AI instances
+2. **Permission System**: Fine-grained access control for AI capabilities
+3. **Multi-user Support**: Scale to support multiple users, each with their own AI instances
+4. **Enhanced Memory Processing**: Advanced memory retrieval and summarization
+5. **Custom Tools**: Integration with external APIs and services
