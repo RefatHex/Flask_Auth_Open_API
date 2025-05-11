@@ -1,145 +1,136 @@
 # AI Memory Management System
 
-A sophisticated system for managing multiple AI instances, each with their own unique identity and persistent memory, built entirely on Firestore.
+A comprehensive system for managing AI instances with persistent memory using Firestore and OpenAI. This system allows you to create AI entities with dedicated memory spaces, chat with them while maintaining conversation context, and manage their memory.
 
-## System Architecture
+## Core Components
 
-This system is designed to support a single user (administrator) who can manage multiple AI instances. Each AI has:
+### AI Chat Client
 
-- Unique UUID for persistent identity
-- Dedicated Firestore collections for memory storage
-- Personalized long-term context retention
+The system provides a non-WebSocket client (`AIChatClient`) that maintains AI continuity through Firestore:
 
-### Core Components
+```python
+from ai_chat_client import AIChatClient
 
-#### 1. Memory Management (Memory_Weaver.py)
+# Create a new AI
+client = AIChatClient(ai_name="MyAssistant")
+client.register()
 
-The `MemoryWeaver` class provides a comprehensive memory management system for AI instances:
+# Chat with the AI with memory continuity
+response = client.chat("Hello! Who are you?")
+print(response)
 
-- **Memory Types:**
+# Subsequent messages maintain conversation context
+follow_up = client.chat("What can you help me with?")
+print(follow_up)
+```
 
-  - `working_memory`: Recent context and conversations (short-term)
-  - `long_term_memory`: Important information to be retained indefinitely
-  - `personal_logs`: AI's internal thoughts and reflections
-  - `archive`: Historical records that may be occasionally accessed
+### Memory Architecture
 
-- **Key Functions:**
-  - `create_ai_memory_space(ai_uuid, ai_name)`: Initializes all memory collections for a new AI
-  - `store_memory(ai_uuid, ai_name, memory_type, content, metadata)`: Adds new memories to specified collection
-  - `retrieve_memories(ai_uuid, ai_name, memory_type, limit, filter_query)`: Gets memories with optional filtering
-  - `move_memory(ai_uuid, ai_name, memory_id, from_type, to_type)`: Relocates memories between collections
+The system uses a structured memory architecture with different memory types:
 
-#### 2. Data Storage (Firestore)
+- **Working Memory**: Recent conversation history and immediate context
+- **Long-term Memory**: Important information to retain over time
+- **Personal Logs**: AI's internal reflections and thoughts
+- **Archive**: Historical data that's rarely accessed
 
-All data is stored in Firestore with the following collections:
+Each AI instance gets dedicated Firestore collections for these memory types, ensuring data isolation and continuity.
 
-- **ai_registry**: Stores metadata about each AI instance
+### Handshake Protocol
 
-  - ai_uuid, name, creation date, access permissions
+New AI instances are registered through a handshake API that:
 
-- **chat_sessions**: Individual conversation sessions
+1. Creates a unique UUID for the AI instance
+2. Sets up memory collections in Firestore
+3. Creates a session record
+4. Registers the AI in the AI registry
 
-  - id, name, user_id, ai_uuid, created_at
+```python
+# Registration example
+client = AIChatClient(ai_name="New Assistant")
+registration = client.register()
 
-- **chats**: All chat messages
-
-  - message, response, user_id, session_id, timestamp
-
-- **memory collections**: Specialized collections for each AI and memory type
-  - Format: `{memory_type}_{ai_uuid}_{ai_name}`
-  - Example: `working_memory_1234_assistant`
-
-#### 3. Socket Communication (sockets.py)
-
-Real-time communication framework to provide immediate updates and interactions:
-
-- Event handlers for various socket events
-- Authentication system to verify connections
-- Room-based messaging for targeted AI communications
-- Memory update notifications
-
-#### 4. Socket Clients (ai_socket_client.py)
-
-Client-side socket connection utilities for AI instances:
-
-- Authentication with server
-- Room joining based on AI UUID
-- Memory update notifications
-- Heartbeat/keep-alive functionality
-
-## API Endpoints
-
-### AI Management
-
-- **POST /v1/handshake**
-
-  - Creates a new AI instance with unique UUID
-  - Initializes memory collections
-  - Returns session data and database paths
-  - Example payload: `{"ai_name": "Assistant Name"}`
-
-- **POST /v1/chat/completions**
-  - Processes new messages for an AI
-  - Retrieves relevant memory context
-  - Gets completion from language model
-  - Stores response in memory
+if registration:
+    print(f"AI created with UUID: {client.ai_uuid}")
+    print(f"Memory paths: {client.memory_paths}")
+```
 
 ### Memory Management
 
-- **POST /create_memory**
+The `MemoryWeaver` class provides utilities for working with AI memory:
 
-  - Creates a new memory entry in specified collection
-  - Required fields: `ai_name`, `ai_uuid`, `memory_type`, `memory_data`
+```python
+from Memory_Weaver import MemoryWeaver
 
-- **POST /edit_memory**
+# Store a memory
+MemoryWeaver.store_memory(
+    ai_uuid,
+    ai_name,
+    "working_memory",
+    "This is an important fact to remember"
+)
 
-  - Updates an existing memory entry
-  - Required fields: `ai_name`, `ai_uuid`, `memory_type`, `memory_id`, `memory_data`
+# Retrieve memories
+recent_memories = MemoryWeaver.retrieve_memories(
+    ai_uuid,
+    ai_name,
+    "working_memory",
+    limit=5
+)
 
-- **POST /delete_memory**
+# Move memory between collections
+MemoryWeaver.move_memory(
+    ai_uuid,
+    ai_name,
+    memory_id,
+    "working_memory",
+    "long_term_memory"
+)
+```
 
-  - Removes a memory entry
-  - Required fields: `ai_name`, `ai_uuid`, `memory_type`, `memory_id`
+## Simple Chat Example
 
-- **POST /move_memory**
-  - Relocates memory between collections
-  - Required fields: `ai_name`, `ai_uuid`, `from_memory_type`, `to_memory_type`, `document_id`
+The repository includes a simple chat example that demonstrates how to use the AI chat system:
 
-## Data Flow
+```bash
+python simple_chat_example.py
+```
 
-1. **AI Creation:**
+This script lets you:
 
-   - Client calls `/v1/handshake` with AI name
-   - System creates UUID, initializes memory collections
-   - Returns session data with UUID
+- Create a new AI instance or use an existing one
+- Chat with the AI using OpenAI's models
+- Maintain conversation context across messages
+- Store all interactions in Firestore
 
-2. **Memory Storage:**
+## Technical Architecture
 
-   - AI interactions stored in Firestore collections
-   - Organized by memory type (working, long-term, etc.)
-   - UUID-based collection names ensure isolation
+### Backend Services
 
-3. **Conversation Context:**
+- **Flask API Server**: Main service handling API requests and WebSocket connections
+- **Firestore Database**: Stores AI data, memory, and conversation history
+- **OpenAI Integration**: Generates AI responses while maintaining context
 
-   - System retrieves recent memories for context
-   - Combines with current messages
-   - Sends to language model for processing
-   - Stores response in working memory
+### API Endpoints
 
-4. **Memory Management:**
-   - Important information can be moved between collections
-   - Long-term memory persists across conversations
-   - Archives can store historical context
+#### AI Registration
 
-## Socket Events
+- `POST /v1/handshake`: Register a new AI instance
+  - Request: `{"ai_name": "Assistant Name"}`
+  - Response: AI information including UUID and session data
 
-- **connect**: Initial connection to server
-- **authenticate**: Verify connection with API key
-- **join**: Join an AI-specific room by UUID
-- **memory_update**: Notify about memory changes
-- **message**: General communication channel
+#### Chat
 
-## Deployment Guide
+- Direct API use via `AIChatClient` class
+- REST API: `POST /v1/chat/completions`
+
+#### Memory Management
+
+- `POST /create_memory`: Create new memory entry
+- `POST /edit_memory`: Edit existing memory
+- `POST /delete_memory`: Delete memory
+- `POST /move_memory`: Move memory between collections
+
+## Setup Instructions
 
 ### Prerequisites
 
@@ -147,7 +138,7 @@ Client-side socket connection utilities for AI instances:
 - Firebase account with Firestore database
 - OpenAI API key
 
-### Setup
+### Installation
 
 1. Install dependencies:
 
@@ -157,31 +148,64 @@ Client-side socket connection utilities for AI instances:
 
 2. Configure environment variables in `.env` file:
 
-   - `FLASK_APP_SECRET_KEY`: Application security key
-   - `JWT_SECRET_KEY`: JWT token key
-   - `OPENAI_API_KEY_FLASK_APP`: OpenAI API key
-   - `ADMIN_EMAIL`: Administrator email
-
-3. Place Firebase service account key in `firebase_sa.json`
-
-4. Start the server:
-   ```bash
-   python App.py
+   ```
+   FLASK_APP_SECRET_KEY=your_app_secret
+   JWT_SECRET_KEY=your_jwt_secret
+   OPENAI_API_KEY_FLASK_APP=your_openai_api_key
+   ADMIN_EMAIL=your_admin_email
    ```
 
-## Security Considerations
+3. Ensure Firebase service account key is present as `firebase_sa.json`
 
-- All API calls require authentication
-- Socket connections must be authenticated
-- AI UUIDs are used for permission scoping
-- Access controls defined in AI registry
+### Running the Application
 
-## Extension Points
+Start the Flask server:
 
-The system is designed to be extended with:
+```bash
+python App.py
+```
 
-1. **AI Capability System**: Add new tools and functions to specific AI instances
-2. **Permission System**: Fine-grained access control for AI capabilities
-3. **Multi-user Support**: Scale to support multiple users, each with their own AI instances
-4. **Enhanced Memory Processing**: Advanced memory retrieval and summarization
-5. **Custom Tools**: Integration with external APIs and services
+## Example Usage
+
+### Create and Chat with an AI
+
+```python
+from ai_chat_client import AIChatClient
+
+# Create and register a new AI
+client = AIChatClient(ai_name="PersonalAssistant")
+client.register()
+
+# Chat with the AI
+response = client.chat("Hello! What's your name?")
+print(f"AI: {response}")
+
+# The AI maintains memory of previous interactions
+follow_up = client.chat("What can you help me with?")
+print(f"AI: {follow_up}")
+
+# View conversation history
+history = client.get_chat_history()
+for entry in history:
+    print(f"User: {entry['user']}")
+    print(f"AI: {entry['ai']}")
+```
+
+## System Architecture Diagram
+
+```
+┌─────────────┐     ┌────────────────┐     ┌───────────────┐
+│             │     │                │     │               │
+│  AI Client  │────▶│  Flask Server  │────▶│   Firestore   │
+│             │     │                │     │   Database    │
+└─────────────┘     └────────────────┘     └───────────────┘
+       │                     │                     ▲
+       │                     │                     │
+       │                     ▼                     │
+       │             ┌────────────┐                │
+       └────────────▶│  OpenAI    │────────────────┘
+                     │   API      │
+                     └────────────┘
+```
+
+This architecture ensures that all AI interactions maintain continuity through persistent storage in Firestore, while leveraging OpenAI's powerful language models for response generation.
